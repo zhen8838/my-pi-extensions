@@ -565,6 +565,33 @@ export default function (pi: ExtensionAPI) {
 		resolvedSsh = getSharedState().config ?? null;
 	});
 
+	// In SSH mode, subagent extensions still create their session metadata and
+	// resource loader locally. Models sometimes copy the remote project path
+	// from the system prompt into subagent.cwd, which makes those extensions try
+	// to stat a remote absolute path on the local machine. Strip that cwd before
+	// execution; the child extension runtime inherits this SSH configuration via
+	// SHARED_SSH_STATE, so its file and shell tools still operate remotely.
+	pi.on("tool_call", (event) => {
+		const ssh = getSsh();
+		if (!ssh || event.toolName !== "subagent") return;
+
+		const input = event.input as { cwd?: unknown; task?: unknown };
+		if (typeof input.cwd !== "string") return;
+
+		const requestedCwd = path.posix.normalize(input.cwd.replaceAll("\\", "/"));
+		if (!path.posix.isAbsolute(requestedCwd) || !isWithinRemoteRoot(ssh.remoteCwd, requestedCwd)) return;
+
+		delete input.cwd;
+		const relative = path.posix.relative(ssh.remoteCwd, requestedCwd);
+		if (relative && typeof input.task === "string") {
+			input.task = [
+				`SSH working-directory note: treat ${requestedCwd} as the requested remote cwd`,
+				`(relative to the remote project root: ${relative}).`,
+				input.task,
+			].join("\n");
+		}
+	});
+
 	// Handle user ! commands via SSH
 	pi.on("user_bash", (_event) => {
 		const ssh = getSsh();
