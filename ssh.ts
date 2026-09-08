@@ -2,8 +2,9 @@
  * SSH Remote Execution for pi
  *
  * Routes read, write, edit, bash, grep, find, and ls to an SSH host. The
- * resolved target and one-time environment snapshot are shared with in-process
- * subagents, whose extension runtimes do not inherit the parent's CLI flags.
+ * resolved target and one-time environment snapshot are shared with native
+ * foreground subagents and detached background runners, whose extension
+ * runtimes do not inherit the parent's CLI flags.
  *
  * Usage:
  *   pi --ssh user@host
@@ -45,6 +46,8 @@ import {
 
 const MAX_CAPTURE_BYTES = 50 * 1024;
 const SHARED_SSH_STATE = Symbol.for("pi.ssh-remote.shared-state");
+const INHERITED_SSH_CONFIG_ENV = "PI_SSH_REMOTE_INHERITED_CONFIG";
+const INHERITED_SSH_CONFIG_VERSION = 1;
 const REMOTE_ENV_ALLOWLIST = new Set([
 	"PATH",
 	"SHELL",
@@ -73,8 +76,20 @@ interface SshConfig {
 	remote: string;
 	remoteCwd: string;
 	init?: string;
+	initApplied?: boolean;
 	shell?: string;
 	forwardedEnv: Record<string, string>;
+	remoteEnv: Record<string, string>;
+}
+
+interface InheritedSshConfig {
+	version: number;
+	raw: string;
+	remote: string;
+	remoteCwd: string;
+	initApplied: boolean;
+	shell?: string;
+	forwardedEnvNames: string[];
 	remoteEnv: Record<string, string>;
 }
 
@@ -110,6 +125,60 @@ function forwardedEnvironment(raw: string | undefined): Record<string, string> {
 		if (value !== undefined) result[name] = value;
 	}
 	return result;
+}
+
+function encodeInheritedSshConfig(config: SshConfig): string {
+	const inherited: InheritedSshConfig = {
+		version: INHERITED_SSH_CONFIG_VERSION,
+		raw: config.raw,
+		remote: config.remote,
+		remoteCwd: config.remoteCwd,
+		initApplied: Boolean(config.init || config.initApplied),
+		...(config.shell ? { shell: config.shell } : {}),
+		forwardedEnvNames: Object.keys(config.forwardedEnv).sort(),
+		remoteEnv: config.remoteEnv,
+	};
+	return JSON.stringify(inherited);
+}
+
+function decodeInheritedSshConfig(raw: string | undefined): SshConfig | null {
+	if (!raw) return null;
+	try {
+		const value = JSON.parse(raw) as Partial<InheritedSshConfig>;
+		if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("payload must be an object");
+		if (value.version !== INHERITED_SSH_CONFIG_VERSION) throw new Error(`unsupported version: ${String(value.version)}`);
+		if (typeof value.raw !== "string" || !value.raw) throw new Error("raw is missing");
+		if (typeof value.remote !== "string" || !value.remote) throw new Error("remote is missing");
+		if (typeof value.remoteCwd !== "string" || !value.remoteCwd) throw new Error("remoteCwd is missing");
+		if (value.shell !== undefined && typeof value.shell !== "string") throw new Error("shell must be a string");
+		if (!Array.isArray(value.forwardedEnvNames) || value.forwardedEnvNames.some((name) => typeof name !== "string")) {
+			throw new Error("forwardedEnvNames must be a string array");
+		}
+		if (!value.remoteEnv || typeof value.remoteEnv !== "object" || Array.isArray(value.remoteEnv)) {
+			throw new Error("remoteEnv must be an object");
+		}
+
+		const remoteEnv: Record<string, string> = {};
+		for (const [name, envValue] of Object.entries(value.remoteEnv)) {
+			if (!REMOTE_ENV_ALLOWLIST.has(name) || typeof envValue !== "string") {
+				throw new Error(`invalid remote environment entry: ${name}`);
+			}
+			remoteEnv[name] = envValue;
+		}
+
+		return {
+			raw: value.raw,
+			remote: value.remote,
+			remoteCwd: path.posix.normalize(value.remoteCwd),
+			initApplied: value.initApplied === true,
+			...(value.shell ? { shell: value.shell } : {}),
+			forwardedEnv: forwardedEnvironment(value.forwardedEnvNames.join(",")),
+			remoteEnv,
+		};
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw new Error(`Invalid ${INHERITED_SSH_CONFIG_ENV}: ${message}`);
+	}
 }
 
 function environmentExports(values: Record<string, string>): string[] {
@@ -415,7 +484,7 @@ async function executeRemoteLs(
 		'name=${entry##*/}',
 		'if [ -d "$entry" ]; then printf \'%s/\\n\' "$name"; else printf \'%s\\n\' "$name"; fi',
 		"done; } | LC_ALL=C sort -f | head -n " + limit,
-	].join("; ");
+	].join("\n");
 	const result = await runRemoteSearch(config, command, signal);
 	if (result.exitCode !== 0) throw remoteFailure("remote ls", result);
 	const text = boundedText(result.stdout).trim();
@@ -450,6 +519,7 @@ export default function (pi: ExtensionAPI) {
 
 	let sessionLocalCwd = templateCwd;
 	let resolvedSsh: SshConfig | null = null;
+	let ownedInheritedConfig: string | undefined;
 
 	const getSsh = () => resolvedSsh;
 
@@ -554,23 +624,33 @@ export default function (pi: ExtensionAPI) {
 				pi.getFlag("ssh-send-env") as string | undefined,
 			);
 			getSharedState().config = resolvedSsh;
+			ownedInheritedConfig = encodeInheritedSshConfig(resolvedSsh);
+			process.env[INHERITED_SSH_CONFIG_ENV] = ownedInheritedConfig;
 			ctx.ui.setStatus("ssh", ctx.ui.theme.fg("accent", `SSH: ${resolvedSsh.remote}:${resolvedSsh.remoteCwd}`));
 			ctx.ui.notify(`SSH mode: ${resolvedSsh.remote}:${resolvedSsh.remoteCwd}`, "info");
 			return;
 		}
 
-		// Subagents create their own extension runtime without the parent's CLI
-		// flagValues. They run in-process, so inherit the resolved parent target
-		// and its one-time environment snapshot through process-global state.
-		resolvedSsh = getSharedState().config ?? null;
+		// Native foreground subagents share this process and use global state.
+		// Detached background runners inherit the serialized, non-secret snapshot
+		// through process.env. Both avoid re-running remoteInit for every child.
+		resolvedSsh = getSharedState().config ?? decodeInheritedSshConfig(process.env[INHERITED_SSH_CONFIG_ENV]);
+		if (resolvedSsh) getSharedState().config = resolvedSsh;
+	});
+
+	pi.on("session_shutdown", () => {
+		if (ownedInheritedConfig && process.env[INHERITED_SSH_CONFIG_ENV] === ownedInheritedConfig) {
+			delete process.env[INHERITED_SSH_CONFIG_ENV];
+		}
 	});
 
 	// In SSH mode, subagent extensions still create their session metadata and
 	// resource loader locally. Models sometimes copy the remote project path
 	// from the system prompt into subagent.cwd, which makes those extensions try
 	// to stat a remote absolute path on the local machine. Strip that cwd before
-	// execution; the child extension runtime inherits this SSH configuration via
-	// SHARED_SSH_STATE, so its file and shell tools still operate remotely.
+	// execution; child extension runtimes inherit this SSH configuration through
+	// process-global state or the detached-runner environment bridge, so their
+	// file and shell tools still operate remotely.
 	pi.on("tool_call", (event) => {
 		const ssh = getSsh();
 		if (!ssh || event.toolName !== "subagent") return;
@@ -609,7 +689,7 @@ export default function (pi: ExtensionAPI) {
 			);
 			if (!modified.includes("<ssh_remote_environment>")) {
 				const environmentNames = Object.keys({ ...ssh.remoteEnv, ...ssh.forwardedEnv }).sort().join(", ");
-				modified += `\n\n<ssh_remote_environment>\nAll read, write, edit, bash, grep, find, and ls operations run on ${ssh.remote}.\nThe remote project root is ${ssh.remoteCwd}. Every bash command already starts there; do not prepend cd to that directory.\nUse command names from the captured remote PATH instead of local absolute executable paths.\nThe remote environment was initialized once for this session${ssh.init ? " using the configured ssh-init command" : " using the remote login shell"}.\nAvailable captured environment names: ${environmentNames || "none"}.\nDo not use the local mirror path ${sessionLocalCwd} while SSH mode is active.\n</ssh_remote_environment>`;
+				modified += `\n\n<ssh_remote_environment>\nAll read, write, edit, bash, grep, find, and ls operations run on ${ssh.remote}.\nThe remote project root is ${ssh.remoteCwd}. Every bash command already starts there; do not prepend cd to that directory.\nUse command names from the captured remote PATH instead of local absolute executable paths.\nThe remote environment was initialized once for this session${ssh.init || ssh.initApplied ? " using the configured ssh-init command" : " using the remote login shell"}.\nAvailable captured environment names: ${environmentNames || "none"}.\nDo not use the local mirror path ${sessionLocalCwd} while SSH mode is active.\n</ssh_remote_environment>`;
 			}
 			return { systemPrompt: modified };
 		}
