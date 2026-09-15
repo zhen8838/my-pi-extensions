@@ -2,6 +2,19 @@
 
 Personal extensions for [pi](https://github.com/earendil-works/pi).
 
+## Stop Current Work
+
+`stop.ts` adds `/stop`, an explicit equivalent of pressing Escape. It aborts
+the active model response or tool execution. With `ssh.ts`, an active SSH tool
+receives the same abort signal and stops its current SSH channel while leaving
+the reusable OpenSSH ControlMaster running.
+
+Install it in pi's user extension directory and run `/reload`:
+
+```bash
+cp stop.ts ~/.pi/agent/extensions/stop.ts
+```
+
 ## SSH Remote Execution
 
 `ssh.ts` keeps pi and its subagents local while routing project tools to a remote SSH host.
