@@ -2,6 +2,13 @@
 
 Personal extensions for [pi](https://github.com/earendil-works/pi).
 
+## Neovim Conventional Editing
+
+[`nvim/lua/vscode_mode.lua`](nvim/lua/vscode_mode.lua) makes ordinary Neovim
+file buffers open in Insert mode, adds familiar Ctrl shortcuts, and saves after
+200 ms of inactivity. F12 temporarily switches to normal Vim navigation. See
+[`nvim/README.md`](nvim/README.md) for setup details.
+
 ## Stop Current Work
 
 `stop.ts` adds `/stop`, an explicit equivalent of pressing Escape. It aborts
