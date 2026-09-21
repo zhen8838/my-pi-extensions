@@ -105,29 +105,47 @@ function M.setup(options)
     desc = "Toggle VS Code/Vim editing mode",
   })
 
-  vim.keymap.set({ "n", "i", "v", "s" }, "<C-s>", function()
+  local function save_current_buffer()
     save_buffer(vim.api.nvim_get_current_buf())
-  end, { silent = true, desc = "Save file" })
+  end
+
+  vim.keymap.set({ "n", "i", "v", "s" }, "<C-s>", save_current_buffer, { silent = true, desc = "Save file" })
+  vim.keymap.set({ "n", "i", "v", "s" }, "<D-s>", save_current_buffer, { silent = true, desc = "Save file" })
 
   vim.keymap.set("i", "<C-z>", "<C-o>u", keymap_opts)
   vim.keymap.set("n", "<C-z>", "u", keymap_opts)
+  vim.keymap.set("i", "<D-z>", "<C-o>u", keymap_opts)
+  vim.keymap.set("n", "<D-z>", "u", keymap_opts)
   vim.keymap.set("i", "<C-y>", "<C-o><C-r>", keymap_opts)
   vim.keymap.set("n", "<C-y>", "<C-r>", keymap_opts)
+  vim.keymap.set("i", "<D-S-z>", "<C-o><C-r>", keymap_opts)
+  vim.keymap.set("n", "<D-S-z>", "<C-r>", keymap_opts)
   vim.keymap.set("i", "<C-f>", "<C-o>/", { desc = "Find" })
   vim.keymap.set("n", "<C-f>", "/", { desc = "Find" })
+  vim.keymap.set("i", "<D-f>", "<C-o>/", { desc = "Find" })
+  vim.keymap.set("n", "<D-f>", "/", { desc = "Find" })
 
   -- Select mode replaces the selection when normal text is typed, like GUI editors.
-  vim.keymap.set({ "i", "n" }, "<C-a>", function()
+  local function select_all()
     vim.cmd.stopinsert()
     vim.cmd("normal! ggVG")
     vim.api.nvim_feedkeys(vim.keycode("<C-g>"), "nx", false)
-  end, keymap_opts)
+  end
+
+  vim.keymap.set({ "i", "n" }, "<C-a>", select_all, keymap_opts)
+  vim.keymap.set({ "i", "n" }, "<D-a>", select_all, keymap_opts)
   vim.keymap.set("x", "<C-c>", '"+y<Cmd>startinsert<CR>', keymap_opts)
   vim.keymap.set("s", "<C-c>", '<C-g>"+y<Cmd>startinsert<CR>', keymap_opts)
+  vim.keymap.set("x", "<D-c>", '"+y<Cmd>startinsert<CR>', keymap_opts)
+  vim.keymap.set("s", "<D-c>", '<C-g>"+y<Cmd>startinsert<CR>', keymap_opts)
   vim.keymap.set("x", "<C-x>", '"+d<Cmd>startinsert<CR>', keymap_opts)
   vim.keymap.set("s", "<C-x>", '<C-g>"+d<Cmd>startinsert<CR>', keymap_opts)
+  vim.keymap.set("x", "<D-x>", '"+d<Cmd>startinsert<CR>', keymap_opts)
+  vim.keymap.set("s", "<D-x>", '<C-g>"+d<Cmd>startinsert<CR>', keymap_opts)
   vim.keymap.set("i", "<C-v>", "<C-r>+", keymap_opts)
   vim.keymap.set("n", "<C-v>", "i<C-r>+", keymap_opts)
+  vim.keymap.set("i", "<D-v>", "<C-r>+", keymap_opts)
+  vim.keymap.set("n", "<D-v>", "i<C-r>+", keymap_opts)
 end
 
 return M
