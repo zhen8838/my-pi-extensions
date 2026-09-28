@@ -13,9 +13,10 @@ normal Vim navigation. See
 ## Stop Current Work
 
 `stop.ts` adds `/stop`, an explicit equivalent of pressing Escape. It aborts
-the active model response or tool execution. With `ssh.ts`, an active SSH tool
-receives the same abort signal and stops its current SSH channel while leaving
-the reusable OpenSSH ControlMaster running.
+the active model response or tool execution. With `ssh.ts`, every remote shell
+tool runs in its own process group. The same abort signal interrupts only that
+process group (escalating from `INT` to `TERM` and `KILL` when needed) while the
+reusable OpenSSH ControlMaster and unrelated parallel commands remain active.
 
 Install it in pi's user extension directory and run `/reload`:
 

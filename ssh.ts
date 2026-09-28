@@ -23,6 +23,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -195,6 +196,17 @@ function buildRemoteCommand(config: SshConfig, command: string): string {
 	return `exec ${launcher} -c ${shellQuote(steps.join(" && "))}`;
 }
 
+function buildTrackedRemoteCommand(config: SshConfig, command: string, pidFile: string): string {
+	const runCommand = buildRemoteCommand(config, command);
+	const runner = 'printf \'%s\\n\' "$$" > "$1"; shift; exec /bin/sh -c "$1"';
+	return [
+		"umask 077",
+		`pid_file=${shellQuote(pidFile)}`,
+		'trap \'rm -f -- "$pid_file"\' EXIT',
+		`setsid /bin/sh -c ${shellQuote(runner)} sh "$pid_file" ${shellQuote(runCommand)}`,
+	].join("; ");
+}
+
 function buildEnvironmentProbe(config: SshConfig): string {
 	const steps = [
 		...environmentExports(config.forwardedEnv),
@@ -223,10 +235,39 @@ function sshMultiplexArgs(): string[] {
 	}
 }
 
+async function terminateRemoteProcessGroup(remote: string, pidFile: string): Promise<void> {
+	const command = [
+		`pid_file=${shellQuote(pidFile)}`,
+		// The abort can race with remote startup. Wait briefly for the tracked
+		// process to publish its process-group id.
+		'attempt=0; while [ ! -r "$pid_file" ] && [ "$attempt" -lt 20 ]; do attempt=$((attempt + 1)); sleep 0.05; done',
+		'[ -r "$pid_file" ] || exit 0',
+		'pid=$(cat -- "$pid_file")',
+		'case "$pid" in ""|*[!0-9]*) exit 0 ;; esac',
+		'kill -INT -- "-$pid" 2>/dev/null || true',
+		'attempt=0; while kill -0 -- "-$pid" 2>/dev/null && [ "$attempt" -lt 10 ]; do attempt=$((attempt + 1)); sleep 0.1; done',
+		'if kill -0 -- "-$pid" 2>/dev/null; then kill -TERM -- "-$pid" 2>/dev/null || true; fi',
+		'attempt=0; while kill -0 -- "-$pid" 2>/dev/null && [ "$attempt" -lt 10 ]; do attempt=$((attempt + 1)); sleep 0.1; done',
+		'if kill -0 -- "-$pid" 2>/dev/null; then kill -KILL -- "-$pid" 2>/dev/null || true; fi',
+		'rm -f -- "$pid_file"',
+	].join("; ");
+
+	const result = await spawnSsh(remote, command, { timeoutSeconds: 5 });
+	if (result.exitCode !== 0) {
+		throw new Error(`Failed to stop remote process group (${result.exitCode}): ${boundedText(result.stderr).trim()}`);
+	}
+}
+
 function spawnSsh(
 	remote: string,
 	command: string,
-	options: { signal?: AbortSignal; timeoutSeconds?: number; input?: Buffer; onData?: (data: Buffer) => void } = {},
+	options: {
+		signal?: AbortSignal;
+		timeoutSeconds?: number;
+		input?: Buffer;
+		onData?: (data: Buffer) => void;
+		remotePidFile?: string;
+	} = {},
 ): Promise<SshResult> {
 	return new Promise((resolve, reject) => {
 		const child = spawn("ssh", [...sshMultiplexArgs(), remote, command], {
@@ -237,6 +278,7 @@ function spawnSsh(
 		const errChunks: Buffer[] = [];
 		let timedOut = false;
 		let settled = false;
+		let stopping = false;
 		const finish = (fn: () => void) => {
 			if (settled) return;
 			settled = true;
@@ -244,15 +286,33 @@ function spawnSsh(
 			options.signal?.removeEventListener("abort", onAbort);
 			fn();
 		};
-		const onAbort = () => child.kill();
+		const stopChild = () => {
+			if (stopping) return;
+			stopping = true;
+			if (!options.remotePidFile) {
+				child.kill();
+				return;
+			}
+
+			// Do not kill the multiplexed SSH client first: ControlMaster owns the
+			// channel and its stdio file descriptors. Stop only this invocation's
+			// remote process group, then let its channel close naturally.
+			void terminateRemoteProcessGroup(remote, options.remotePidFile)
+				.catch(() => {})
+				.finally(() => {
+					if (child.exitCode === null && child.signalCode === null) child.kill();
+				});
+		};
+		const onAbort = () => stopChild();
 		const timer = options.timeoutSeconds
 			? setTimeout(() => {
 				timedOut = true;
-				child.kill();
+				stopChild();
 			}, options.timeoutSeconds * 1000)
 			: undefined;
 
 		options.signal?.addEventListener("abort", onAbort, { once: true });
+		if (options.signal?.aborted) onAbort();
 		child.stdout.on("data", (data: Buffer) => {
 			chunks.push(data);
 			options.onData?.(data);
@@ -378,12 +438,19 @@ function createRemoteEditOps(config: SshConfig, localCwd: string): EditOperation
 
 function createRemoteBashOps(config: SshConfig, localCwd: string): BashOperations {
 	return {
-		exec: (command, cwd, { onData, signal, timeout }) =>
-			spawnSsh(
+		exec: (command, cwd, { onData, signal, timeout }) => {
+			const pidFile = `/tmp/pi-agent-ssh-${randomBytes(16).toString("hex")}.pid`;
+			const remoteCommand = buildTrackedRemoteCommand(
+				{ ...config, remoteCwd: toRemotePath(cwd, config, localCwd) },
+				command,
+				pidFile,
+			);
+			return spawnSsh(
 				config.remote,
-				buildRemoteCommand({ ...config, remoteCwd: toRemotePath(cwd, config, localCwd) }, command),
-				{ signal, timeoutSeconds: timeout, onData },
-			).then((result) => ({ exitCode: result.exitCode })),
+				remoteCommand,
+				{ signal, timeoutSeconds: timeout, onData, remotePidFile: pidFile },
+			).then((result) => ({ exitCode: result.exitCode }));
+		},
 	};
 }
 
