@@ -2,13 +2,15 @@
 
 Personal extensions for [pi](https://github.com/earendil-works/pi).
 
-## Neovim Conventional Editing
+## Neovim Configuration
 
-[`nvim/lua/vscode_mode.lua`](nvim/lua/vscode_mode.lua) makes ordinary Neovim
-file buffers open in Insert mode, adds macOS Command shortcuts with Ctrl
-fallbacks, and saves after 200 ms of inactivity. F12 temporarily switches to
-normal Vim navigation. See
-[`nvim/README.md`](nvim/README.md) for setup details.
+[`nvim/init.lua`](nvim/init.lua) is a portable Neovim configuration:
+nvim-tree, telescope, diffview, markview for in-buffer Markdown rendering, and
+snacks.image for inline images. It loads
+[`nvim/lua/vscode_mode.lua`](nvim/lua/vscode_mode.lua), which opens ordinary
+buffers in Insert mode, adds macOS Command shortcuts with Ctrl fallbacks, and
+autosaves after 200 ms; F12 switches to normal Vim navigation. See
+[`nvim/README.md`](nvim/README.md) for deployment details.
 
 ## Stop Current Work
 
