@@ -19,7 +19,7 @@ function tokenElement(token,id,dark,theme){
 
 export class MarkdownPreview{
   constructor(){
-    this.doc={blocks:[]};this.toc=[];this.heights=[];this.scroll=0;this.height=0;this.width=0;
+    this.doc={blocks:[]};this.toc=[];this.heights=[];this.scroll=0;this.scrollX=0;this.contentWidth=0;this.height=0;this.width=0;
     this.total=0;this.tocHeight=0;this.generation=0;this.showToc=true;this.loading=false;this.error=null;
     this.scrollEpoch=0;this.refreshAnchor=null;this.layoutPending=false;this.layoutMeasured=false;
   }
@@ -35,7 +35,7 @@ export class MarkdownPreview{
   }
   close(){
     this.generation++;this.clearDerivedState();this.loading=false;this.error=null;
-    this.identity=null;this.source=null;this.target=null;
+    this.identity=null;this.source=null;this.target=null;this.scrollX=0;
   }
   async build(source,target,generation,cx){
     try{
@@ -52,7 +52,7 @@ export class MarkdownPreview{
     if(!force&&identity===this.identity&&source===this.source)return;
     const sameIdentity=identity===this.identity;
     if(sameIdentity&&this.doc.blocks.length)this.refreshAnchor={...captureBlockScroll(this.doc.blocks,this.heights,this.scroll,this.topOffset()),epoch:this.scrollEpoch};
-    if(!sameIdentity){this.scroll=0;this.selected=null;this.clearDerivedState()}
+    if(!sameIdentity){this.scroll=0;this.scrollX=0;this.selected=null;this.clearDerivedState()}
     this.identity=identity;this.source=source;this.target={...target};this.error=null;
     const generation=++this.generation;
     if(prepared&&!collectMarkdownImages(source).length){this.loading=false;this.applyDocument(prepared);return}
@@ -72,6 +72,26 @@ export class MarkdownPreview{
     blocks.forEach((block,index)=>{block.__index=index});visit(blocks);return result;
   }
   maxScroll(){return Math.max(0,this.total-this.height)}
+  maxScrollX(){return Math.max(0,this.contentWidth-this.width)}
+  moveX(next,cx){
+    const value=Math.max(0,Math.min(this.maxScrollX(),next));
+    if(Math.abs(value-this.scrollX)>.2){this.scrollX=value;cx.notify()}
+  }
+  tableWidths(block,size){
+    const rows=[block.header,...block.rows];
+    return block.header.map((_cell,column)=>Math.max(120,...rows.map(cells=>Math.min(420,Math.max(80,textOf(cells[column]).length*size*.65+34)))));
+  }
+  canvasWidth(size){
+    let wide=0;
+    const visit=(items,indent=0)=>{for(const block of items??[]){
+      if(block.kind==="code")wide=Math.max(wide,Math.ceil(block.columns*size*.7)+26+indent);
+      if(block.kind==="table")wide=Math.max(wide,this.tableWidths(block,size).reduce((sum,width)=>sum+width,0)+2+indent);
+      if(block.blocks)visit(block.blocks,indent+22);
+      if(block.items)for(const item of block.items)visit(item.blocks,indent+36);
+    }};
+    visit(this.doc.blocks);
+    return Math.ceil(Math.max(Math.min(900,this.width||900),wide+48));
+  }
   topOffset(){return 24+this.tocHeight+(this.loading?21:0)+(this.error?21:0)}
   manualScroll(){
     this.pending=null;this.scrollEpoch++;
@@ -128,7 +148,7 @@ export class MarkdownPreview{
     const raw=block.lines.map(line=>line.map(token=>token[0]).join("")).join("\n");
     return v_flex().w_full().flex_none().rounded(6).bg(theme.markdown.codeBlockBackground).border_1().border_color(theme.markdown.tableBorder)
       .when(Boolean(block.language&&block.language!=="text"),element=>element.child(div().h(26).px(12).flex().items_center().text_size(11).text_color(theme.markdown.muted).child(block.language)))
-      .child(div().id(id+"-scroll").w_full().min_w(0).overflow_x_scrollbar().p(12)
+      .child(div().id(id+"-code").w_full().min_w(0).p(12)
         .child(v_flex().relative().min_w(width).font_family(this.family).text_size(size).line_height(lineHeight+"px")
           .children(block.lines.map((line,lineIndex)=>h_flex().id(id+"-line-"+lineIndex).h(lineHeight).flex_none().gap(0)
             .children(line.map((token,tokenIndex)=>tokenElement(token,id+"-"+lineIndex+"-"+tokenIndex,theme.dark,theme)))))
@@ -137,9 +157,9 @@ export class MarkdownPreview{
   }
   table(block,id,size,theme){
     const rows=[block.header,...block.rows];
-    const widths=block.header.map((_cell,column)=>Math.max(120,...rows.map(cells=>Math.min(420,Math.max(80,textOf(cells[column]).length*size*.65+34)))));
+    const widths=this.tableWidths(block,size);
     const total=widths.reduce((sum,width)=>sum+width,0);
-    return div().id(id+"-scroll").w_full().min_w(0).overflow_x_scrollbar()
+    return div().id(id+"-table").w_full().min_w(0)
       .child(v_flex().w(total).flex_none().border_1().border_color(theme.markdown.tableBorder)
         .children(rows.map((cells,row)=>h_flex().w_full().items_stretch().bg(row===0?theme.markdown.tableHeaderBackground:row%2===0?theme.markdown.tableAltBackground:theme.markdown.tableBodyBackground)
           .children(cells.map((runs,column)=>v_flex().w(widths[column]).min_w(widths[column]).flex_none().px(12).py(8)
@@ -163,7 +183,8 @@ export class MarkdownPreview{
       else if(block.kind==="table")body=this.table(block,key,size,theme);
       else if(block.kind==="image")body=(block.markdown?TextView.markdown(key,block.markdown):TextView.html(key,block.html??"")).selectable(true).scrollable(false).w_full();
       else body=this.rich(key,block.runs??[],size,theme);
-      return div().id(key).w_full().min_w(0).flex_none().child(body);
+      return div().id(key).w_full().min_w(0).flex_none()
+        .when(block.kind!=="code"&&block.kind!=="table"&&block.kind!=="list"&&block.kind!=="quote",element=>element.max_w(852)).child(body);
     }));
   }
   tocView(theme,cx){
@@ -178,15 +199,20 @@ export class MarkdownPreview{
   }
   render(cx,options){
     const{theme,family,size}=options;this.family=family;
+    this.contentWidth=this.canvasWidth(size);
+    this.scrollX=Math.max(0,Math.min(this.maxScrollX(),this.scrollX));
+    const ratioX=Math.min(1,this.width/this.contentWidth),trackX=Math.max(1,this.width-12);
+    const thumbX=Math.max(24,trackX*ratioX),travelX=Math.max(1,trackX-thumbX);
+    const leftX=this.maxScrollX()?this.scrollX/this.maxScrollX()*travelX:0;
     const ratio=this.total?Math.min(1,this.height/this.total):1,thumb=Math.max(24,this.height*ratio),travel=Math.max(1,this.height-thumb);
     const thumbTop=this.maxScroll()?this.scroll/this.maxScroll()*travel:0,toc=this.tocView(theme,cx);
     return v_flex().id("files-markdown-preview").relative().size_full().min_h(0).min_w(0).overflow_hidden().bg(theme.markdown.background).text_color(theme.markdown.foreground)
       .on_size_change((measured,liveCx)=>{if(this.width!==measured.width||this.height!==measured.height){this.width=measured.width;this.height=measured.height;this.move(this.scroll,liveCx,false);liveCx.notify()}})
       .on_mouse_up("left",()=>{this.drag=null}).on_hover(hovered=>{if(!hovered)this.drag=null})
-      .on_mouse_move((event,liveCx)=>{if(this.drag)this.move(this.drag.scroll+(event.position.y-this.drag.y)/travel*this.maxScroll(),liveCx)})
-      .on_scroll_wheel((event,liveCx)=>{this.move(this.scroll-event.delta.y,liveCx);liveCx.stop_propagation()})
-      .child(div().absolute().left(0).right(0).top(-this.scroll)
-        .child(v_flex().id("markdown-content").w_full().max_w(900).mx_auto().px(24).py(24).bg(theme.markdown.background)
+      .on_mouse_move((event,liveCx)=>{if(this.drag){if(this.drag.axis==="x")this.moveX(this.drag.scroll+(event.position.x-this.drag.x)/travelX*this.maxScrollX(),liveCx);else this.move(this.drag.scroll+(event.position.y-this.drag.y)/travel*this.maxScroll(),liveCx)}})
+      .on_scroll_wheel((event,liveCx)=>{if(event.delta.y)this.move(this.scroll-event.delta.y,liveCx);if(event.delta.x)this.moveX(this.scrollX-event.delta.x,liveCx);liveCx.stop_propagation()})
+      .child(div().absolute().left(Math.max(0,(this.width-this.contentWidth)/2)-this.scrollX).w(this.contentWidth).top(-this.scroll)
+        .child(v_flex().id("markdown-content").w_full().px(24).py(24).bg(theme.markdown.background)
           .on_size_change((measured,liveCx)=>{const height=Math.ceil(measured.height);this.layoutMeasured=true;if(height!==this.total){this.total=height;if(!this.layoutPending)this.move(this.scroll,liveCx,false);liveCx.notify()}this.finishLayout(liveCx)})
           .when(this.loading,element=>element.child(div().pb(10).text_size(11).text_color(theme.markdown.muted).child("Loading preview…")))
           .when(Boolean(this.error),element=>element.child(div().pb(10).text_size(11).text_color(theme.markdown.muted).child(this.error)))
@@ -194,7 +220,11 @@ export class MarkdownPreview{
           .when(Boolean(toc),element=>element.child(toc))
           .children(this.doc.blocks.map((block,index)=>div().id("markdown-measure-"+index).w_full().flex_none()
             .on_size_change((measured,liveCx)=>this.measure(index,measured.height,liveCx)).child(this.blocks([block],"block-"+index,size,theme))))))
-      .when(ratio<1,element=>element.child(div().id("markdown-scroll").absolute().right(2).top(0).bottom(0).w(10).rounded(5).bg(theme.markdown.codeBlockBackground)
+      .when(ratioX<1,element=>element.child(div().id("markdown-scroll-x").absolute().left(0).right(12).bottom(2).h(10).rounded(5).bg(theme.markdown.codeBlockBackground)
+        .on_mouse_down("left",(event,liveCx)=>{liveCx.stop_propagation();if(event.local_position)this.moveX((event.local_position.x-thumbX/2)/travelX*this.maxScrollX(),liveCx)})
+        .child(div().absolute().left(leftX).top(2).h(6).w(thumbX).rounded(3).bg(theme.markdown.muted)
+          .on_mouse_down("left",(event,liveCx)=>{liveCx.stop_propagation();this.drag={axis:"x",x:event.position.x,scroll:this.scrollX}}))))
+      .when(ratio<1,element=>element.child(div().id("markdown-scroll").absolute().right(2).top(0).bottom(ratioX<1?12:0).w(10).rounded(5).bg(theme.markdown.codeBlockBackground)
         .on_mouse_down("left",(event,liveCx)=>{liveCx.stop_propagation();if(event.local_position)this.move((event.local_position.y-thumb/2)/travel*this.maxScroll(),liveCx)})
         .child(div().absolute().top(thumbTop).left(2).w(6).h(thumb).rounded(3).bg(theme.markdown.muted)
           .on_mouse_down("left",(event,liveCx)=>{liveCx.stop_propagation();this.drag={y:event.position.y,scroll:this.scroll}}))));

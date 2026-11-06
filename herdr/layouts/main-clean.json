@@ -79,7 +79,7 @@
           "id": "tabs",
           "type": "block",
           "content": {
-            "mod": "tabs"
+            "mod": "main-clean-tabs"
           },
           "size": {
             "px": 42

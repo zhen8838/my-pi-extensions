@@ -99,10 +99,8 @@ assert.equal((await readFile(result.images[0].path)).length > 0, true);
 const main = await readFile(new URL("../main.js", import.meta.url), "utf8");
 const preview = await readFile(new URL("../preview-native.js", import.meta.url), "utf8");
 const sourceView = await readFile(new URL("../source-view.js", import.meta.url), "utf8");
-assert(main.includes("EditorState.new({ value, language, readonly:true"));
-assert(main.includes("Editor.new(this.code)"));
-assert(main.includes("new SourceView(cx)"));
-assert(main.includes("prepareDocument(text,path)"));
+assert(main.includes("new SourceView(cx,"));
+assert(main.includes("prepareDocument(text, path)"));
 assert(preview.includes("TextView.markdown"));
 assert(preview.includes(".selectable(true)"));
 assert(preview.includes("tableBodyBackground"));
@@ -113,4 +111,4 @@ assert.equal(preview.includes("Copy"), false);
 assert.equal(main.includes("openOverlay"), false);
 assert.equal(main.includes("hc read"), false);
 
-console.log("PASS: custom themed Source, native fallback, selectable Preview, TOC, GitHub surfaces, image fallback and no Copy controls");
+console.log("PASS: custom themed Source, selectable Preview, TOC, GitHub surfaces, image fallback and no Copy controls");

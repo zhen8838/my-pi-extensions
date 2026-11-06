@@ -14,10 +14,10 @@ const deferred = () => {
 function environment(read, storage = new Map()) {
   const jobs = [];
   const workspace = { cwd:"/root", on:"remote", space:"s" };
-  let editorCreates=0,editorUpdates=0,markdownUpdates=0,highlightUpdates=0,notifies=0;
+  let markdownUpdates=0,highlightUpdates=0,notifies=0;
   const highlightIdentities=[],highlightRevisions=[];
   class MarkdownPreview {
-    constructor() { this.doc={toc:[]}; this.showToc=true; }
+    constructor() { this.doc={blocks:[]}; this.showToc=true; }
     close() {}
     setDocument() { markdownUpdates++; }
   }
@@ -38,10 +38,6 @@ function environment(read, storage = new Map()) {
     panes:()=>[{pane:"p",cwd:workspace.cwd}],
     layout:()=>({}), window:()=>({platform:"macos"}),
     readTextFile:read,
-    EditorState:{new(options) {
-      editorCreates++;
-      return {options,value:options.value,set_value(value){this.value=value;editorUpdates++;},release(){}};
-    }},
     localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value)},
   });
   const Files = vm.runInContext(source, context);
@@ -53,66 +49,62 @@ function environment(read, storage = new Map()) {
   });
   const cx = {spawn(body){jobs.push(body(cx));},notify(){notifies++;}};
   const drain = async () => { for (let i=0;i<jobs.length;i++) await jobs[i]; };
-  return {files,cx,drain,storage,Files,editorCreates:()=>editorCreates,editorUpdates:()=>editorUpdates,markdownUpdates:()=>markdownUpdates,highlightUpdates:()=>highlightUpdates,
+  return {files,cx,drain,storage,Files,markdownUpdates:()=>markdownUpdates,highlightUpdates:()=>highlightUpdates,
     highlightIdentities:()=>highlightIdentities,highlightRevisions:()=>highlightRevisions,notifies:()=>notifies};
 }
 
 {
   let text = "# first";
   const e = environment(async()=>text);
-  e.files.show("chosen.md",e.cx);
+  e.files.openFile("chosen.md",e.cx);
   await e.drain();
   assert.equal(e.files.file,"chosen.md");
-  assert.equal(e.files.code.options.readonly,true);
-  assert.equal(e.files.code.options.font_size,16.5);
-  assert.equal(e.editorCreates(),1);
+  assert.equal(e.files.sourceText,"# first");
   assert.equal(e.markdownUpdates(),1);
   assert.equal(e.highlightUpdates(),1);
   const oldNotify=e.notifies();
   e.files.refreshPreview(e.cx);
   await e.drain();
-  assert.equal(e.editorUpdates(),0);
   assert.equal(e.markdownUpdates(),1);
   assert.equal(e.highlightUpdates(),1);
   assert.equal(e.notifies(),oldNotify);
   text="# second";
   e.files.refreshPreview(e.cx);
   await e.drain();
-  assert.equal(e.editorCreates(),1);
-  assert.equal(e.editorUpdates(),1);
+  assert.equal(e.files.sourceText,"# second");
   assert.equal(e.markdownUpdates(),2);
   assert.equal(e.highlightUpdates(),2);
   assert.equal(e.highlightIdentities()[0],e.highlightIdentities()[1]);
   assert.notEqual(e.highlightRevisions()[0],e.highlightRevisions()[1]);
   assert.equal(e.files.file,"chosen.md");
-  console.log("PASS: unchanged polling is inert; changed Markdown updates native Editor and Preview without switching files");
+  console.log("PASS: unchanged polling is inert; changed Markdown updates Source and Preview without switching files");
 }
 
 {
   const a=deferred(), b=deferred();
   const e=environment(path=>path.endsWith("a.md")?a.promise:b.promise);
-  e.files.show("a.md",e.cx);
+  e.files.openFile("a.md",e.cx);
   await Promise.resolve();
-  e.files.show("b.md",e.cx);
+  e.files.openFile("b.md",e.cx);
   await Promise.resolve();
   b.resolve("B"); a.resolve("A");
   await e.drain();
   assert.equal(e.files.file,"b.md");
-  assert.equal(e.files.code.value,"B");
+  assert.equal(e.files.sourceText,"B");
   console.log("PASS: stale async reads cannot replace the later file");
 }
 
 {
   let text="ok";
   const e=environment(async()=>text);
-  e.files.show("kept.md",e.cx);
-  e.files.previewMode="preview";
+  e.files.openFile("kept.md",e.cx);
+  e.files.view="preview";
   e.files.folders.add("src");
   e.files.remember();
   await e.drain();
   const saved=JSON.parse(e.storage.get("files.view.v1"));
   assert.equal(saved[0][1].file,"kept.md");
-  assert.equal(saved[0][1].mode,"preview");
+  assert.equal(saved[0][1].view,"preview");
   assert.deepEqual(saved[0][1].folders,["src"]);
   text=null;
   e.files.refreshPreview(e.cx);
@@ -121,15 +113,15 @@ function environment(read, storage = new Map()) {
   text="restored";
   e.files.refreshPreview(e.cx);
   await e.drain();
-  assert.equal(e.files.code.value,"restored");
+  assert.equal(e.files.sourceText,"restored");
   console.log("PASS: view state persists and deleted/recreated files recover at the same path");
 }
 
 {
   const e=environment(async()=>"binary\0data");
-  e.files.show("x.bin",e.cx);
+  e.files.openFile("x.bin",e.cx);
   await e.drain();
-  assert.equal(e.files.code,null);
+  assert.equal(e.files.sourceText,null);
   assert.match(e.files.fileError,/Binary/);
   console.log("PASS: binary files remain bounded read-only errors");
 }

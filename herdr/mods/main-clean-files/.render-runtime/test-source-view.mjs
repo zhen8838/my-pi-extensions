@@ -16,7 +16,7 @@ const cx={
   stop_propagation(){stopped++},
   notify(){notified++},
 };
-const view=new SourceView(cx);
+const view=new SourceView(cx,()=>{focused++});
 const text="alpha path/file.cpp:42\n中文😀 line\nthird";
 const lines=text.split("\n").map(line=>[[line,{color:"#111"},{color:"#eee"}]]);
 view.setDocument({source:{lines,columns:40}},text,"fixture");
@@ -40,6 +40,9 @@ view.keyDown({keystroke:"cmd-c"},cx);
 assert.equal(copied,text);
 view.keyDown({keystroke:"escape"},cx);
 assert.equal(view.selectedText(),"");
+let escapeStopped=false;
+view.keyDown({keystroke:"escape"},{...cx,stop_propagation(){escapeStopped=true}});
+assert.equal(escapeStopped,false,"Escape must bubble to the Files panel to return to its tree");
 
 const kept=new SourceView(cx),lineHeight=26;
 kept.lineHeight=lineHeight;kept.scrollY=lineHeight+7;kept.scrollX=41;
@@ -53,5 +56,13 @@ assert.equal(kept.scrollX,41);
 kept.setDocument({source:{lines,columns:40}},text,"different-file",1);
 assert.equal(kept.scrollY,0);
 assert.equal(kept.scrollX,0);
+
+const plain=new SourceView(cx);
+const longLine="x".repeat(1000);
+plain.setDocument({source:{lines:[],columns:0}},longLine,"plain-fallback");
+plain.width=300;
+assert(plain.maxX(10)>9000,"plain text fallback width must come from actual text, not missing token metadata");
+plain.anchor=10;plain.cursor=20;plain.keyDown({keystroke:"cmd-c"},cx);
+assert.equal(copied,"x".repeat(10));
 
 console.log("PASS: SourceView selection/copy and same-file logical scroll retention; different files reset");

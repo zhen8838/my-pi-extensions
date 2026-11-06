@@ -50,4 +50,21 @@ const cx={notify(){notified++},spawn(){throw Error("prepared documents must not 
 }
 
 assert(notified>0);
+{
+  const preview=new MarkdownPreview();
+  const code={kind:"code",language:"text",columns:200,lines:[[ ["a long line",{},{}] ]]};
+  preview.setDocument("wide",target,cx,true,document([code]));
+  preview.width=500;preview.contentWidth=preview.canvasWidth(16.5);
+  assert(preview.contentWidth>2000,"wide code must contribute to the document's horizontal extent");
+  preview.moveX(120,cx);assert.equal(preview.scrollX,120);
+  const oldY=preview.scroll;
+  preview.moveX(100000,cx);assert.equal(preview.scrollX,preview.maxScrollX());
+  assert.equal(preview.scroll,oldY,"horizontal movement must not change vertical position");
+  preview.moveX(-1,cx);assert.equal(preview.scrollX,0);
+  preview.moveX(120,cx);
+  preview.setDocument("wide updated",target,cx,true,document([code]));
+  assert.equal(preview.scrollX,120,"same-file refresh retains the horizontal position");
+  preview.setDocument("other",{...target,path:"other.md"},cx,true,document([paragraph("other")]));
+  assert.equal(preview.scrollX,0,"different file resets horizontal position");
+}
 console.log("PASS: Markdown refresh preserves block position, respects manual scroll, and resets on file change");

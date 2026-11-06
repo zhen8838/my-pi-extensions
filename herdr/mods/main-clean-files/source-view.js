@@ -7,8 +7,8 @@ const GUTTER=58;
 
 
 export class SourceView{
-  constructor(cx){
-    this.focus=cx.focus_handle();
+  constructor(_cx,activate=()=>{}){
+    this.activate=activate;
     this.text="";this.lines=[""];this.starts=[0];this.anchor=0;this.cursor=0;
     this.scrollX=0;this.scrollY=0;this.width=0;this.height=0;this.activeLine=0;
   }
@@ -18,8 +18,8 @@ export class SourceView{
     const scrollAnchor=sameIdentity?captureLineScroll(this.lines,this.scrollY,lineHeight):null;
     if(!sameIdentity){this.anchor=this.cursor=0;this.scrollX=this.scrollY=0;this.activeLine=0}
     this.documentIdentity=identity;this.documentRevision=revision;this.document=document;this.text=text;
-    this.lines=text.split("\n");this.starts=[];let offset=0;
-    for(let index=0;index<this.lines.length;index++){this.starts.push(offset);offset+=this.lines[index].length+(index+1<this.lines.length?1:0)}
+    this.lines=text.split("\n");this.starts=[];this.maxColumns=0;let offset=0;
+    for(let index=0;index<this.lines.length;index++){this.starts.push(offset);offset+=this.lines[index].length+(index+1<this.lines.length?1:0);this.maxColumns=Math.max(this.maxColumns,columns(this.lines[index]))}
     if(sameIdentity)this.scrollY=restoreLineScroll(scrollAnchor,this.lines,lineHeight);
     this.anchor=Math.max(0,Math.min(this.text.length,this.anchor));
     this.cursor=Math.max(0,Math.min(this.text.length,this.cursor));
@@ -28,7 +28,7 @@ export class SourceView{
   range(){return[Math.min(this.anchor,this.cursor),Math.max(this.anchor,this.cursor)]}
   selectedText(){const[start,end]=this.range();return this.text.slice(start,end)}
   maxY(lineHeight){return Math.max(0,this.lines.length*lineHeight-this.height)}
-  maxX(charWidth){return Math.max(0,(this.document?.source?.columns??0)*charWidth+GUTTER+24-this.width)}
+  maxX(charWidth){return Math.max(0,(this.maxColumns??0)*charWidth+GUTTER+24-this.width)}
   clamp(lineHeight,charWidth){
     this.scrollY=Math.max(0,Math.min(this.maxY(lineHeight),this.scrollY));
     this.scrollX=Math.max(0,Math.min(this.maxX(charWidth),this.scrollX));
@@ -40,7 +40,7 @@ export class SourceView{
     return{line,offset:this.starts[line]+offsetAtColumn(this.lines[line],target)};
   }
   mouseDown(event,cx,lineHeight,charWidth){
-    const point=this.point(event,lineHeight,charWidth);this.focus.focus();this.activeLine=point.line;
+    const point=this.point(event,lineHeight,charWidth);this.activate();this.activeLine=point.line;
     if(event.click_count>=3){
       this.anchor=this.starts[point.line];
       this.cursor=this.anchor+this.lines[point.line].length+(point.line+1<this.lines.length?1:0);
@@ -70,7 +70,8 @@ export class SourceView{
     }else if(event.keystroke==="cmd-a"||event.keystroke==="ctrl-a"){
       this.anchor=0;this.cursor=this.text.length;cx.stop_propagation();cx.notify();
     }else if(event.keystroke==="escape"){
-      this.anchor=this.cursor=0;this.dragging=false;cx.stop_propagation();cx.notify();
+      // Let the owning Files panel handle Escape and return to its tree.
+      this.anchor=this.cursor=0;this.dragging=false;cx.notify();
     }
   }
   token(token,index,theme){
@@ -106,18 +107,17 @@ export class SourceView{
     const ratioY=this.lines.length*lineHeight?Math.min(1,this.height/(this.lines.length*lineHeight)):1;
     const thumbY=Math.max(24,this.height*ratioY),travelY=Math.max(1,this.height-thumbY);
     const topY=this.maxY(lineHeight)?this.scrollY/this.maxY(lineHeight)*travelY:0;
-    const contentWidth=(this.document?.source?.columns??0)*charWidth+GUTTER+24;
+    const contentWidth=(this.maxColumns??0)*charWidth+GUTTER+24;
     const ratioX=contentWidth?Math.min(1,this.width/contentWidth):1;
     const thumbX=Math.max(24,this.width*ratioX),travelX=Math.max(1,this.width-thumbX);
     const leftX=this.maxX(charWidth)?this.scrollX/this.maxX(charWidth)*travelX:0;
     return v_flex().id("files-source-view").relative().size_full().min_h(0).min_w(0).overflow_hidden().cursor_text()
-      .track_focus(this.focus).bg(theme.source.background).text_color(theme.source.foreground)
+      .bg(theme.source.background).text_color(theme.source.foreground)
       .on_size_change((measured,liveCx)=>{if(measured.width!==this.width||measured.height!==this.height){this.width=measured.width;this.height=measured.height;this.clamp(lineHeight,charWidth);liveCx.notify()}})
       .on_mouse_down("left",(event,liveCx)=>this.mouseDown(event,liveCx,lineHeight,charWidth))
       .on_mouse_move((event,liveCx)=>this.mouseMove(event,liveCx,lineHeight,charWidth))
       .on_mouse_up("left",()=>{this.dragging=false;this.scrollDrag=null})
       .on_hover(hovered=>{if(!hovered){this.dragging=false;this.scrollDrag=null}})
-      .on_key_down((event,liveCx)=>this.keyDown(event,liveCx))
       .on_scroll_wheel((event,liveCx)=>{
         this.scrollY-=event.delta.y;this.scrollX-=event.delta.x;
         this.clamp(lineHeight,charWidth);liveCx.stop_propagation();liveCx.notify();

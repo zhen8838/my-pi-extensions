@@ -8,6 +8,12 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const files = path.join(root, "mods", "main-clean-files");
 const installation = spawnSync(process.execPath, [path.join(root, "test-install.mjs")], { stdio: "inherit" });
 if (installation.error || installation.status !== 0) process.exit(installation.status || 1);
+const keyboard = spawnSync(process.execPath, [path.join(root, "test-files-keyboard.mjs")], { stdio: "inherit" });
+if (keyboard.error || keyboard.status !== 0) process.exit(keyboard.status || 1);
+const rows = spawnSync(process.execPath, [path.join(root, "test-files-render.mjs")], { stdio: "inherit" });
+if (rows.error || rows.status !== 0) process.exit(rows.status || 1);
+const state = spawnSync(process.execPath, [path.join(root, "test-files-state.mjs")], { stdio: "inherit" });
+if (state.error || state.status !== 0) process.exit(state.status || 1);
 const tests = [
   ".render-runtime/test-render.mjs",
   ".render-runtime/test-source.mjs",

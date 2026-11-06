@@ -18,6 +18,18 @@
     "cmd-,": "mod.open:main-clean-settings"
   },
   "layout:main-clean": {
-    "cmd-,": "mod.open:main-clean-settings"
+    "cmd-1": "main-clean-tabs.select-1",
+    "cmd-2": "main-clean-tabs.select-2",
+    "cmd-3": "main-clean-tabs.select-3",
+    "cmd-4": "main-clean-tabs.select-4",
+    "cmd-5": "main-clean-tabs.select-5",
+    "cmd-6": "main-clean-tabs.select-6",
+    "cmd-7": "main-clean-tabs.select-7",
+    "cmd-8": "main-clean-tabs.select-8",
+    "cmd-9": "main-clean-tabs.select-9",
+    "cmd-,": "mod.open:main-clean-settings",
+    "cmd-shift-e": "main-clean-tabs.toggle-files",
+    "cmd-shift-v": "main-clean-tabs.toggle-preview",
+    "cmd-alt-e": "main-clean-tabs.focus-files"
   }
 }
