@@ -2,6 +2,13 @@
 
 Personal extensions for [pi](https://github.com/earendil-works/pi).
 
+## Herdr Layout and Mods
+
+[`herdr/`](herdr/README.md) contains the `main-clean` layout, custom Files and
+Settings mods, sidebar chrome and shortcut overrides. It includes a backup-aware
+installer, pinned rendering dependencies and regression tests. The snapshot
+excludes machine registrations, workspace state and personal project paths.
+
 ## Neovim Configuration
 
 [`nvim/init.lua`](nvim/init.lua) is a portable Neovim configuration:

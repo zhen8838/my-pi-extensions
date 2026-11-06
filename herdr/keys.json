@@ -1,0 +1,23 @@
+{
+  "global": {
+    "cmd-pageup": "agent.prev",
+    "cmd-pagedown": "agent.next",
+    "cmd-b": "layout.toggle:sidebar",
+    "cmd-,": "mod.open:main-clean-settings",
+    "cmd-1": "tab.select:1",
+    "cmd-2": "tab.select:2",
+    "cmd-3": "tab.select:3",
+    "cmd-4": "tab.select:4",
+    "cmd-5": "tab.select:5",
+    "cmd-6": "tab.select:6",
+    "cmd-7": "tab.select:7",
+    "cmd-8": "tab.select:8",
+    "cmd-9": "tab.select:9"
+  },
+  "terminal": {
+    "cmd-,": "mod.open:main-clean-settings"
+  },
+  "layout:main-clean": {
+    "cmd-,": "mod.open:main-clean-settings"
+  }
+}

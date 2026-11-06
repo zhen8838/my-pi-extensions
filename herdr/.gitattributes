@@ -1,0 +1,2 @@
+# Preserve the upstream browser bundle byte-for-byte.
+mods/main-clean-files/.markdown-runtime/vendor/** -whitespace
